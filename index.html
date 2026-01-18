@@ -92,10 +92,10 @@
           }
 
           playbackConfig.manifestRequestHandler = (requestInfo) => {
-            if (currentUrl) requestInfo.url = currentUrl;
-            requestInfo.withCredentials = false;
-            requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
-          };
+  requestInfo.withCredentials = false;
+  requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
+};
+
 
           playbackConfig.segmentRequestHandler = (requestInfo) => {
             requestInfo.withCredentials = false;
