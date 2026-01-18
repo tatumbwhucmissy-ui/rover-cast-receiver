@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Rover IPTV Receiver</title>
+
+    <!-- CAF Receiver SDK -->
+    <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; }
+      #hint {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: rgba(255,255,255,0.75);
+        font-family: Arial, sans-serif;
+        letter-spacing: 0.3px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="hint">Ready to Cast</div>
+
+    <script>
+      const context = cast.framework.CastReceiverContext.getInstance();
+      const playerManager = context.getPlayerManager();
+
+      // Optional: allow custom headers for manifest and segments.
+      // Note: some headers like User-Agent and Referer are restricted in web environments.
+      const playbackConfig = new cast.framework.PlaybackConfig();
+
+      function parseContentId(contentId) {
+        // Supported format:
+        // https://example.com/stream.m3u8|Authorization=Bearer%20TOKEN&X-Token=abc
+        const raw = String(contentId || "");
+        const parts = raw.split("|");
+        const url = parts[0].trim();
+        const headers = {};
+
+        if (parts.length > 1 && parts[1]) {
+          const kv = parts[1].split("&");
+          for (const pair of kv) {
+            const eq = pair.indexOf("=");
+            if (eq > 0) {
+              const k = decodeURIComponent(pair.slice(0, eq).trim());
+              const v = decodeURIComponent(pair.slice(eq + 1).trim());
+              if (k && v) headers[k] = v;
+            }
+          }
+        }
+        return { url, headers };
+      }
+
+      playbackConfig.manifestRequestHandler = (requestInfo) => {
+        const media = playerManager.getMediaInformation();
+        const parsed = parseContentId(media && media.contentId);
+        requestInfo.url = parsed.url;
+        requestInfo.withCredentials = false;
+        requestInfo.headers = Object.assign({}, requestInfo.headers, parsed.headers);
+      };
+
+      playbackConfig.segmentRequestHandler = (requestInfo) => {
+        const media = playerManager.getMediaInformation();
+        const parsed = parseContentId(media && media.contentId);
+        requestInfo.withCredentials = false;
+        requestInfo.headers = Object.assign({}, requestInfo.headers, parsed.headers);
+      };
+
+      playerManager.setPlaybackConfig(playbackConfig);
+
+      // Ensure LOAD uses the URL part (before |) as the actual contentId.
+      playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD,
+        (loadRequestData) => {
+          const parsed = parseContentId(loadRequestData.media && loadRequestData.media.contentId);
+          loadRequestData.media.contentId = parsed.url;
+          return loadRequestData;
+        }
+      );
+
+      context.start();
+    </script>
+  </body>
+</html>
