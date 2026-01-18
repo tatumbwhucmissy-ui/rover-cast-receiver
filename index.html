@@ -11,6 +11,7 @@
     <!-- CAF Receiver SDK -->
     <script
       src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"
+      crossorigin="anonymous"
       onerror="window.__cafLoadError = 'CAF SDK failed to load. Check HTTPS, CSP, and network access to gstatic.'"
     ></script>
 
@@ -61,9 +62,19 @@
       }
 
       window.addEventListener("error", (event) => {
+        const isResourceError = event && event.target && event.target.tagName;
+        if (isResourceError) {
+          const tag = event.target.tagName.toLowerCase();
+          const src = event.target.src || event.target.href || "unknown";
+          showError("Resource error: " + tag + " " + src);
+          return;
+        }
         const detail = event && event.message ? event.message : "Unknown error";
-        showError("JS error: " + detail);
-      });
+        const source = event && event.filename ? event.filename : "unknown";
+        const line = event && event.lineno ? event.lineno : "?";
+        const col = event && event.colno ? event.colno : "?";
+        showError("JS error: " + detail + " @ " + source + ":" + line + ":" + col);
+      }, true);
 
       window.addEventListener("unhandledrejection", (event) => {
         const detail = event && event.reason ? event.reason : "Unknown rejection";
