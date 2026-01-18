@@ -1,104 +1,144 @@
-<script>
-  const hintEl = document.getElementById("hint");
-  const logEl = document.getElementById("log");
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Rover IPTV Receiver</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; }
+      #hint {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: rgba(255,255,255,0.85);
+        font-family: Arial, sans-serif;
+        font-size: 20px;
+        letter-spacing: 0.2px;
+      }
+      #log {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        max-height: 55%;
+        overflow: auto;
+        color: rgba(255,255,255,0.85);
+        white-space: pre-wrap;
+        font-family: monospace;
+        font-size: 14px;
+        margin: 0;
+      }
+    </style>
+  </head>
 
-  function setHint(msg) {
-    if (hintEl) hintEl.textContent = msg;
-  }
+  <body>
+    <div id="hint">Receiver page loaded</div>
+    <pre id="log"></pre>
 
-  function log(msg) {
-    const line = `[${new Date().toISOString()}] ${msg}`;
-    console.log(line);
-    if (logEl) logEl.textContent += line + "\n";
-    setHint(msg);
-  }
+    <script>
+      const hintEl = document.getElementById("hint");
+      const logEl = document.getElementById("log");
 
-  window.onerror = (m, s, l, c) => log(`JS ERROR: ${m} @${s}:${l}:${c}`);
-  window.onunhandledrejection = (e) =>
-    log(`PROMISE REJECT: ${e && e.reason ? e.reason : e}`);
-
-  function startReceiver() {
-    try {
-      if (!window.cast || !cast.framework) {
-        log("CAF loaded but cast.framework is not available in this environment.");
-        return;
+      function setHint(msg) {
+        if (hintEl) hintEl.textContent = msg;
       }
 
-      log("CAF available. Starting receiver.");
+      function log(msg) {
+        const line = `[${new Date().toISOString()}] ${msg}`;
+        console.log(line);
+        if (logEl) logEl.textContent += line + "\n";
+        setHint(msg);
+      }
 
-      const context = cast.framework.CastReceiverContext.getInstance();
-      const playerManager = context.getPlayerManager();
-      const playbackConfig = new cast.framework.PlaybackConfig();
+      window.onerror = (m, s, l, c) => log(`JS ERROR: ${m} @${s}:${l}:${c}`);
+      window.onunhandledrejection = (e) =>
+        log(`PROMISE REJECT: ${e && e.reason ? e.reason : e}`);
 
-      let currentHeaders = {};
-      let currentUrl = "";
-
-      function parseContentId(contentId) {
-        const raw = String(contentId || "");
-        const parts = raw.split("|");
-        const url = (parts[0] || "").trim();
-        const headers = {};
-
-        if (parts.length > 1 && parts[1]) {
-          const kv = parts[1].split("&");
-          for (const pair of kv) {
-            const eq = pair.indexOf("=");
-            if (eq > 0) {
-              const k = decodeURIComponent(pair.slice(0, eq).trim());
-              const v = decodeURIComponent(pair.slice(eq + 1).trim());
-              if (k && v) headers[k] = v;
-            }
+      function startReceiver() {
+        try {
+          if (!window.cast || !cast.framework) {
+            log("CAF loaded but cast.framework is not available in this environment.");
+            return;
           }
+
+          log("CAF available. Starting receiver.");
+
+          const context = cast.framework.CastReceiverContext.getInstance();
+          const playerManager = context.getPlayerManager();
+          const playbackConfig = new cast.framework.PlaybackConfig();
+
+          let currentHeaders = {};
+          let currentUrl = "";
+
+          function parseContentId(contentId) {
+            const raw = String(contentId || "");
+            const parts = raw.split("|");
+            const url = (parts[0] || "").trim();
+            const headers = {};
+
+            if (parts.length > 1 && parts[1]) {
+              const kv = parts[1].split("&");
+              for (const pair of kv) {
+                const eq = pair.indexOf("=");
+                if (eq > 0) {
+                  const k = decodeURIComponent(pair.slice(0, eq).trim());
+                  const v = decodeURIComponent(pair.slice(eq + 1).trim());
+                  if (k && v) headers[k] = v;
+                }
+              }
+            }
+            return { url, headers };
+          }
+
+          playbackConfig.manifestRequestHandler = (requestInfo) => {
+            if (currentUrl) requestInfo.url = currentUrl;
+            requestInfo.withCredentials = false;
+            requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
+          };
+
+          playbackConfig.segmentRequestHandler = (requestInfo) => {
+            requestInfo.withCredentials = false;
+            requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
+          };
+
+          playerManager.setPlaybackConfig(playbackConfig);
+
+          playerManager.setMessageInterceptor(
+            cast.framework.messages.MessageType.LOAD,
+            (loadRequestData) => {
+              const parsed = parseContentId(loadRequestData.media && loadRequestData.media.contentId);
+              currentUrl = parsed.url;
+              currentHeaders = parsed.headers || {};
+              if (loadRequestData.media) loadRequestData.media.contentId = currentUrl;
+
+              log(`LOAD received. URL: ${currentUrl} headers: ${Object.keys(currentHeaders).join(", ")}`);
+              return loadRequestData;
+            }
+          );
+
+          context.addEventListener(
+            cast.framework.system.EventType.READY,
+            () => log("Receiver READY")
+          );
+
+          context.start();
+          log("context.start() called");
+        } catch (e) {
+          log(`BOOT EXCEPTION: ${e && e.message ? e.message : e}`);
         }
-        return { url, headers };
       }
 
-      playbackConfig.manifestRequestHandler = (requestInfo) => {
-        if (currentUrl) requestInfo.url = currentUrl;
-        requestInfo.withCredentials = false;
-        requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
+      log("Loading CAF script from gstatic...");
+
+      const s = document.createElement("script");
+      s.src = "https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js";
+      s.onload = () => {
+        log("CAF script loaded. Initializing...");
+        startReceiver();
       };
-
-      playbackConfig.segmentRequestHandler = (requestInfo) => {
-        requestInfo.withCredentials = false;
-        requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
-      };
-
-      playerManager.setPlaybackConfig(playbackConfig);
-
-      playerManager.setMessageInterceptor(
-        cast.framework.messages.MessageType.LOAD,
-        (loadRequestData) => {
-          const parsed = parseContentId(loadRequestData.media && loadRequestData.media.contentId);
-          currentUrl = parsed.url;
-          currentHeaders = parsed.headers || {};
-          if (loadRequestData.media) loadRequestData.media.contentId = currentUrl;
-
-          log(`LOAD received. URL: ${currentUrl} headers: ${Object.keys(currentHeaders).join(", ")}`);
-          return loadRequestData;
-        }
-      );
-
-      context.addEventListener(
-        cast.framework.system.EventType.READY,
-        () => log("Receiver READY")
-      );
-
-      context.start();
-      log("context.start() called");
-    } catch (e) {
-      log(`BOOT EXCEPTION: ${e && e.message ? e.message : e}`);
-    }
-  }
-
-  log("Loading CAF script from gstatic...");
-
-  const s = document.createElement("script");
-  s.src = "https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js";
-  s.onload = () => {
-    log("CAF script loaded. Initializing...");
-    startReceiver();
-  };
-  s.onerror = () => log("CAF script FAILED to load from gstatic.");
-  document.head.appendChild(s);
-</script>
+      s.onerror = () => log("CAF script FAILED to load from gstatic.");
+      document.head.appendChild(s);
+    </script>
+  </body>
+</html>
