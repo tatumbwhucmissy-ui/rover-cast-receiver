@@ -8,25 +8,23 @@
     />
     <title>Rover IPTV Receiver</title>
 
-    <style>
-      html,
-      body {
-        margin: 0;
-        height: 100%;
-        background: #000;
-      }
+    <!-- CAF Receiver SDK -->
+    <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; }
+      cast-media-player { width: 100%; height: 100%; }
       #hint {
         position: absolute;
         inset: 0;
         display: grid;
         place-items: center;
-        color: rgba(255, 255, 255, 0.85);
+        z-index: 2;
+        color: rgba(255,255,255,0.85);
         font-family: Arial, sans-serif;
         font-size: 20px;
         letter-spacing: 0.2px;
       }
-
       #log {
         position: absolute;
         left: 12px;
@@ -34,48 +32,50 @@
         bottom: 12px;
         max-height: 55%;
         overflow: auto;
-        color: rgba(255, 255, 255, 0.85);
+        color: rgba(255,255,255,0.85);
         white-space: pre-wrap;
         font-family: monospace;
         font-size: 14px;
         margin: 0;
-        pointer-events: none;
+        z-index: 3;
       }
     </style>
   </head>
 
   <body>
-    <div id="hint">Receiver page loaded</div>
+    <div id="hint">Receiver READY</div>
     <pre id="log"></pre>
+    <cast-media-player></cast-media-player>
 
     <script>
       const hintEl = document.getElementById("hint");
       const logEl = document.getElementById("log");
 
-      function setHint(msg) {
-        if (hintEl) hintEl.textContent = msg;
+      function safeJson(value) {
+        try {
+          return JSON.stringify(value);
+        } catch (_) {
+          return String(value);
+        }
       }
 
-      function log(msg) {
-        const line = `[${new Date().toISOString()}] ${msg}`;
+      function log(message) {
+        const line = `[${new Date().toISOString()}] ${message}`;
         console.log(line);
         if (logEl) logEl.textContent += line + "\n";
-        setHint(msg);
+      }
+
+      function setHint(message) {
+        if (hintEl) hintEl.textContent = message;
       }
 
       window.onerror = (m, s, l, c) => log(`JS ERROR: ${m} @${s}:${l}:${c}`);
       window.onunhandledrejection = (e) =>
         log(`PROMISE REJECT: ${e && e.reason ? e.reason : e}`);
 
-      function safeJson(obj) {
-        try {
-          return JSON.stringify(obj);
-        } catch (_) {
-          return String(obj);
-        }
-      }
-
       function parseContentId(contentId) {
+        // Supported format:
+        // https://example.com/stream.m3u8|Authorization=Bearer%20TOKEN&X-Token=abc
         const raw = String(contentId || "");
         const parts = raw.split("|");
         const url = (parts[0] || "").trim();
@@ -96,104 +96,90 @@
       }
 
       function startReceiver() {
-        try {
-          if (!window.cast || !cast.framework) {
-            log("CAF loaded but cast.framework is not available in this environment.");
+        if (!window.cast || !cast.framework) {
+          log("CAF SDK not available. Check access to gstatic.");
+          return;
+        }
+
+        const context = cast.framework.CastReceiverContext.getInstance();
+        const playerManager = context.getPlayerManager();
+        const playbackConfig = new cast.framework.PlaybackConfig();
+
+        let currentHeaders = {};
+        let currentUrl = "";
+
+        playbackConfig.manifestRequestHandler = (requestInfo) => {
+          requestInfo.withCredentials = false;
+          if (Object.keys(currentHeaders).length) {
+            requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
+          }
+        };
+
+        playbackConfig.segmentRequestHandler = (requestInfo) => {
+          requestInfo.withCredentials = false;
+          if (Object.keys(currentHeaders).length) {
+            requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
+          }
+        };
+
+        playerManager.setPlaybackConfig(playbackConfig);
+
+        playerManager.setMessageInterceptor(
+          cast.framework.messages.MessageType.LOAD,
+          (loadRequestData) => {
+            const parsed = parseContentId(loadRequestData.media && loadRequestData.media.contentId);
+            const customData = loadRequestData && loadRequestData.customData;
+            const customHeaders = customData && customData.headers ? customData.headers : null;
+            currentHeaders = customHeaders && Object.keys(customHeaders).length
+              ? customHeaders
+              : parsed.headers;
+            currentUrl = parsed.url;
+
+            if (customData && customData.contentType && loadRequestData.media) {
+              loadRequestData.media.contentType = customData.contentType;
+            }
+
+            if (loadRequestData.media) {
+              loadRequestData.media.contentId = currentUrl;
+            }
+
+            log(`LOAD received. URL: ${currentUrl} headers: ${safeJson(currentHeaders)}`);
+            log(`MEDIA INFO: ${safeJson(loadRequestData.media)}`);
+            return loadRequestData;
+          }
+        );
+
+        function addPmListener(type, label) {
+          if (!type) {
+            log(`Skip listener ${label}: event type undefined`);
             return;
           }
-
-          log("CAF available. Starting receiver.");
-
-          const context = cast.framework.CastReceiverContext.getInstance();
-          const playerManager = context.getPlayerManager();
-          const playbackConfig = new cast.framework.PlaybackConfig();
-
-          let currentHeaders = {};
-          let currentUrl = "";
-
-          // IMPORTANT:
-          // Do not overwrite requestInfo.url for manifest requests.
-          // HLS needs to fetch master, then variant manifests, then segments.
-          // We only attach headers here.
-          playbackConfig.manifestRequestHandler = (requestInfo) => {
-            requestInfo.withCredentials = false;
-            requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
-          };
-
-          playbackConfig.segmentRequestHandler = (requestInfo) => {
-            requestInfo.withCredentials = false;
-            requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
-          };
-
-          playerManager.setPlaybackConfig(playbackConfig);
-
-          // On-screen playback diagnostics
-          try {
-            playerManager.addEventListener(cast.framework.events.EventType.ERROR, (e) => {
-              log("PLAYER ERROR: " + safeJson(e));
-            });
-
-            playerManager.addEventListener(
-              cast.framework.events.EventType.PLAYER_STATE_CHANGED,
-              (e) => log("PLAYER STATE: " + safeJson(e))
-            );
-
-            playerManager.addEventListener(
-              cast.framework.events.EventType.MEDIA_STATUS,
-              (e) => log("MEDIA STATUS: " + safeJson(e))
-            );
-
-            playerManager.addEventListener(
-              cast.framework.events.EventType.BUFFERING,
-              (e) => log("BUFFERING: " + safeJson(e))
-            );
-          } catch (err) {
-            log("Listener attach failed: " + (err && err.message ? err.message : err));
-          }
-
-          // Capture headers from contentId once, then keep using them for all requests.
-          playerManager.setMessageInterceptor(
-            cast.framework.messages.MessageType.LOAD,
-            (loadRequestData) => {
-              const media = loadRequestData && loadRequestData.media ? loadRequestData.media : {};
-              const parsed = parseContentId(media.contentId);
-
-              currentUrl = parsed.url;
-              currentHeaders = parsed.headers || {};
-
-              if (loadRequestData.media) loadRequestData.media.contentId = currentUrl;
-
-              log(
-                `LOAD received. URL: ${currentUrl} headers: ${Object.keys(currentHeaders).join(", ")}`
-              );
-              log("MEDIA INFO: " + safeJson(loadRequestData.media || {}));
-
-              return loadRequestData;
-            }
-          );
-
-          context.addEventListener(
-            cast.framework.system.EventType.READY,
-            () => log("Receiver READY")
-          );
-
-          context.start();
-          log("context.start() called");
-        } catch (e) {
-          log(`BOOT EXCEPTION: ${e && e.message ? e.message : e}`);
+          playerManager.addEventListener(type, (e) => log(`${label}: ${safeJson(e)}`));
         }
+
+        addPmListener(cast.framework.events.EventType.ERROR, "PLAYER ERROR");
+        addPmListener(cast.framework.events.EventType.BUFFERING, "BUFFERING");
+        addPmListener(cast.framework.events.EventType.MEDIA_STATUS, "MEDIA STATUS");
+        addPmListener(cast.framework.events.EventType.PLAYER_LOAD_COMPLETE, "LOAD COMPLETE");
+        addPmListener(cast.framework.events.EventType.PLAYING, "PLAYING");
+        addPmListener(cast.framework.events.EventType.PAUSE, "PAUSE");
+
+        context.addEventListener(
+          cast.framework.system.EventType.ERROR,
+          (event) => log(`CAST ERROR: ${safeJson(event && event.error ? event.error : event)}`)
+        );
+
+        context.addEventListener(
+          cast.framework.system.EventType.READY,
+          () => setHint("Receiver READY")
+        );
+
+        context.start();
+        log("context.start() called");
       }
 
-      log("Loading CAF script from gstatic...");
-
-      const s = document.createElement("script");
-      s.src = "https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js";
-      s.onload = () => {
-        log("CAF script loaded. Initializing...");
-        startReceiver();
-      };
-      s.onerror = () => log("CAF script FAILED to load from gstatic.");
-      document.head.appendChild(s);
+      log("Initializing receiver...");
+      startReceiver();
     </script>
   </body>
 </html>
