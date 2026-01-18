@@ -9,7 +9,12 @@
     <title>Rover IPTV Receiver</title>
 
     <!-- CAF Receiver SDK -->
-    <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+    <script
+      src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+      onerror="window.__cafLoadError = 'CAF SDK failed to load. Check HTTPS, CSP, and network access to gstatic.'"
+    ></script>
 
     <style>
       html, body { margin: 0; height: 100%; background: #000; }
@@ -67,10 +72,19 @@
         showError("Promise rejection: " + detail);
       });
 
-      const context = cast.framework.CastReceiverContext.getInstance();
-      const playerManager = context.getPlayerManager();
-      const hint = document.getElementById("hint");
-      let currentHeaders = {};
+      if (window.__cafLoadError) {
+        showError(window.__cafLoadError);
+      }
+
+      if (!window.cast || !cast.framework) {
+        showError("CAF SDK not available. Check that gstatic is reachable and no CSP is blocking it.");
+      }
+
+      if (window.cast && cast.framework) {
+        const context = cast.framework.CastReceiverContext.getInstance();
+        const playerManager = context.getPlayerManager();
+        const hint = document.getElementById("hint");
+        let currentHeaders = {};
 
       // Optional: allow custom headers for manifest and segments.
       // Note: some headers like User-Agent and Referer are restricted in web environments.
@@ -162,7 +176,8 @@
         }
       );
 
-      context.start();
+        context.start();
+      }
     </script>
   </body>
 </html>
