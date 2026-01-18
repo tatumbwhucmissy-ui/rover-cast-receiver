@@ -17,7 +17,8 @@
         width: 100%;
         height: 100%;
       }
-      #hint {
+      #hint,
+      #errors {
         position: absolute;
         inset: 0;
         display: grid;
@@ -26,15 +27,46 @@
         color: rgba(255,255,255,0.75);
         font-family: Arial, sans-serif;
         letter-spacing: 0.3px;
+        padding: 24px;
+        text-align: center;
+      }
+
+      #errors {
+        z-index: 3;
+        color: #ff9f9f;
+        font-size: 14px;
+        white-space: pre-wrap;
+        display: none;
       }
     </style>
   </head>
 
   <body>
     <div id="hint">Ready to Cast</div>
+    <div id="errors"></div>
     <cast-media-player></cast-media-player>
 
     <script>
+      const errors = document.getElementById("errors");
+      const errorMessages = [];
+
+      function showError(message) {
+        if (!errors) return;
+        errorMessages.push(message);
+        errors.textContent = errorMessages.join("\n");
+        errors.style.display = "grid";
+      }
+
+      window.addEventListener("error", (event) => {
+        const detail = event && event.message ? event.message : "Unknown error";
+        showError("JS error: " + detail);
+      });
+
+      window.addEventListener("unhandledrejection", (event) => {
+        const detail = event && event.reason ? event.reason : "Unknown rejection";
+        showError("Promise rejection: " + detail);
+      });
+
       const context = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
       const hint = document.getElementById("hint");
@@ -119,6 +151,14 @@
           } else {
             hint.style.display = "none";
           }
+        }
+      );
+
+      context.addEventListener(
+        cast.framework.system.EventType.ERROR,
+        (event) => {
+          const detail = event && event.error ? event.error : event;
+          showError("Cast error: " + JSON.stringify(detail));
         }
       );
 
