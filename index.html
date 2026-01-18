@@ -2,20 +2,31 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <title>Rover IPTV Receiver</title>
+
     <style>
-      html, body { margin: 0; height: 100%; background: #000; }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+      }
+
       #hint {
         position: absolute;
         inset: 0;
         display: grid;
         place-items: center;
-        color: rgba(255,255,255,0.85);
+        color: rgba(255, 255, 255, 0.85);
         font-family: Arial, sans-serif;
         font-size: 20px;
         letter-spacing: 0.2px;
       }
+
       #log {
         position: absolute;
         left: 12px;
@@ -23,11 +34,12 @@
         bottom: 12px;
         max-height: 55%;
         overflow: auto;
-        color: rgba(255,255,255,0.85);
+        color: rgba(255, 255, 255, 0.85);
         white-space: pre-wrap;
         font-family: monospace;
         font-size: 14px;
         margin: 0;
+        pointer-events: none;
       }
     </style>
   </head>
@@ -55,6 +67,34 @@
       window.onunhandledrejection = (e) =>
         log(`PROMISE REJECT: ${e && e.reason ? e.reason : e}`);
 
+      function safeJson(obj) {
+        try {
+          return JSON.stringify(obj);
+        } catch (_) {
+          return String(obj);
+        }
+      }
+
+      function parseContentId(contentId) {
+        const raw = String(contentId || "");
+        const parts = raw.split("|");
+        const url = (parts[0] || "").trim();
+        const headers = {};
+
+        if (parts.length > 1 && parts[1]) {
+          const kv = parts[1].split("&");
+          for (const pair of kv) {
+            const eq = pair.indexOf("=");
+            if (eq > 0) {
+              const k = decodeURIComponent(pair.slice(0, eq).trim());
+              const v = decodeURIComponent(pair.slice(eq + 1).trim());
+              if (k && v) headers[k] = v;
+            }
+          }
+        }
+        return { url, headers };
+      }
+
       function startReceiver() {
         try {
           if (!window.cast || !cast.framework) {
@@ -71,31 +111,14 @@
           let currentHeaders = {};
           let currentUrl = "";
 
-          function parseContentId(contentId) {
-            const raw = String(contentId || "");
-            const parts = raw.split("|");
-            const url = (parts[0] || "").trim();
-            const headers = {};
-
-            if (parts.length > 1 && parts[1]) {
-              const kv = parts[1].split("&");
-              for (const pair of kv) {
-                const eq = pair.indexOf("=");
-                if (eq > 0) {
-                  const k = decodeURIComponent(pair.slice(0, eq).trim());
-                  const v = decodeURIComponent(pair.slice(eq + 1).trim());
-                  if (k && v) headers[k] = v;
-                }
-              }
-            }
-            return { url, headers };
-          }
-
+          // IMPORTANT:
+          // Do not overwrite requestInfo.url for manifest requests.
+          // HLS needs to fetch master, then variant manifests, then segments.
+          // We only attach headers here.
           playbackConfig.manifestRequestHandler = (requestInfo) => {
-  requestInfo.withCredentials = false;
-  requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
-};
-
+            requestInfo.withCredentials = false;
+            requestInfo.headers = Object.assign({}, requestInfo.headers, currentHeaders);
+          };
 
           playbackConfig.segmentRequestHandler = (requestInfo) => {
             requestInfo.withCredentials = false;
@@ -104,15 +127,47 @@
 
           playerManager.setPlaybackConfig(playbackConfig);
 
+          // On-screen playback diagnostics
+          try {
+            playerManager.addEventListener(cast.framework.events.EventType.ERROR, (e) => {
+              log("PLAYER ERROR: " + safeJson(e));
+            });
+
+            playerManager.addEventListener(
+              cast.framework.events.EventType.PLAYER_STATE_CHANGED,
+              (e) => log("PLAYER STATE: " + safeJson(e))
+            );
+
+            playerManager.addEventListener(
+              cast.framework.events.EventType.MEDIA_STATUS,
+              (e) => log("MEDIA STATUS: " + safeJson(e))
+            );
+
+            playerManager.addEventListener(
+              cast.framework.events.EventType.BUFFERING,
+              (e) => log("BUFFERING: " + safeJson(e))
+            );
+          } catch (err) {
+            log("Listener attach failed: " + (err && err.message ? err.message : err));
+          }
+
+          // Capture headers from contentId once, then keep using them for all requests.
           playerManager.setMessageInterceptor(
             cast.framework.messages.MessageType.LOAD,
             (loadRequestData) => {
-              const parsed = parseContentId(loadRequestData.media && loadRequestData.media.contentId);
+              const media = loadRequestData && loadRequestData.media ? loadRequestData.media : {};
+              const parsed = parseContentId(media.contentId);
+
               currentUrl = parsed.url;
               currentHeaders = parsed.headers || {};
+
               if (loadRequestData.media) loadRequestData.media.contentId = currentUrl;
 
-              log(`LOAD received. URL: ${currentUrl} headers: ${Object.keys(currentHeaders).join(", ")}`);
+              log(
+                `LOAD received. URL: ${currentUrl} headers: ${Object.keys(currentHeaders).join(", ")}`
+              );
+              log("MEDIA INFO: " + safeJson(loadRequestData.media || {}));
+
               return loadRequestData;
             }
           );
