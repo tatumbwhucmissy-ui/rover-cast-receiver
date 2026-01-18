@@ -3,10 +3,6 @@
   <head>
     <meta charset="utf-8" />
     <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self' https: data: blob:; script-src 'self' https://www.gstatic.com 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; media-src * data: blob:; connect-src * data: blob:;"
-    />
-    <meta
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
@@ -15,8 +11,6 @@
     <!-- CAF Receiver SDK -->
     <script
       src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
       onerror="window.__cafLoadError = 'CAF SDK failed to load. Check HTTPS, CSP, and network access to gstatic.'"
     ></script>
 
